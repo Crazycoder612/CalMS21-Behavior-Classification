@@ -2,7 +2,7 @@
 An independent machine-learning analysis of the Caltech Mouse Social Interactions (CalMS21) dataset. I used tracked body landmarks from pairs of mice to classify each video frame as attack, investigation, mount, or other. I trained XGBoost classifiers and tested whether explicit measures of proximity and movement over time improved classification.
 
 My best configuration achieved 86.98% accuracy and 79.56% macro F1 on a recording-level validation split. These are validation results, not independent test-set results or official CalMS21 benchmark scores. The central result of this project is the progression from raw pose coordinates to interaction and temporal features, and the measurable differences between those choices—not a new biological finding.
-# 1. Where the data came from
+## 1. Where the data came from
 Dataset: Caltech Mouse Social Interactions (CalMS21), Task 1: Classic Classification, released by the CalMS21 research team.
 - Dataset record and download — CaltechDATA
 - Dataset overview
