@@ -1,111 +1,161 @@
-# CalMS21-Behavior-Classification
-A machine learning pipeline for classifying mouse social behaviors from pose-tracking data in the Caltech Mouse Social Interactions (CalMS21) dataset. This project uses a Random Forest classifier and movement-based feature engineering to identify attack, investigation, mount, and other behaviors from tracked body landmarks.
+# Classifying mouse social behavior from pose trajectories
+An independent machine-learning analysis of the Caltech Mouse Social Interactions (CalMS21) dataset. I used tracked body landmarks from pairs of mice to classify each video frame as attack, investigation, mount, or other. I trained XGBoost classifiers and tested whether explicit measures of proximity and movement over time improved classification.
 
-Best validation performance: 82.14% accuracy and 72.07% macro F1-score on held-out recordings. These are validation, not official test-set, results.
-Project overview
-The goal is to explore how animal movement and spatial relationships can be transformed into quantitative features for automated behavioral classification. Rather than training a pose-estimation model from raw video, this project starts from the CalMS21 dataset's precomputed mouse keypoints and predicts the behavioral labels assigned by expert annotators.
+My best configuration achieved 86.98% accuracy and 79.56% macro F1 on a recording-level validation split. These are validation results, not independent test-set results or official CalMS21 benchmark scores. The central result of this project is the progression from raw pose coordinates to interaction and temporal features, and the measurable differences between those choices—not a new biological finding.
+1. Where the data came from
+Dataset: Caltech Mouse Social Interactions (CalMS21), Task 1: Classic Classification, released by the CalMS21 research team.
+- Dataset record and download — CaltechDATA
+- Dataset overview
+- Dataset paper — The Multi-Agent Behavior Dataset: Mouse Dyadic Social Interactions
+- Dataset DOI: 10.22002/D1.1991
+The recordings come from a resident–intruder assay: two freely behaving mice, filmed from above. The dataset authors generated pose tracks and frame-by-frame behavior annotations. I did not collect the videos, annotate the behavior, or train the original pose-tracking system. This project begins with the published keypoints and labels.
 
-The work was motivated by an interest in using computer vision and machine learning to measure animal behavior in experimental biomedical research. This model does not classify anesthetic states or responses to anesthesia.
-Dataset
-- Source: CalMS21, version 1.0
-- Task: Task 1 — classic behavior classification
-- Training-source recordings analyzed: 70
-- Total labeled frames analyzed: 507,738
-- Pose representation: Two mice, seven landmarks each (nose, left ear, right ear, neck, left hip, right hip, tail base); each landmark has x/y coordinates
-- Behavior labels: 0 = Attack, 1 = Investigation, 2 = Mount, 3 = Other
-Frame distribution (70 recordings)
-Behavior	Frames	Share
-Attack	14,039	2.77%
-Investigation	146,615	28.88%
-Mount	28,615	5.64%
-Other	318,469	62.72%
-Total	507,738	100%
+I worked with task1_classic_classification.zip, reading calms21_task1_train.json directly from the ZIP using Python's zipfile module. I did not use the raw videos, the optional MARS feature files, or the other CalMS21 tasks.
 
-
-The classes are imbalanced, especially Attack. For that reason, macro F1-score is reported alongside accuracy.
-Methodology
-1. Load and prepare the data
-The pipeline reads calms21_task1_train.json from task1_classic_classification.zip and obtains tracked keypoints and expert behavior annotations. The original pose tensor for each recording is flattened into 28 positional features per frame (2 mice × 2 coordinates × 7 body parts).
-2. Engineer movement features
-Two types of interpretable features were added incrementally:
-- Movement speed (2 features): Frame-to-frame displacement of each mouse's tracked neck point, multiplied by the 30 FPS sampling rate (pixels/second).
-- Inter-mouse distance (1 feature): Euclidean distance between the two mice's neck landmarks (pixels).
-The final input therefore contains 31 features per frame. Speed estimates can be affected by pose-tracking noise.
-3. Train and validate
-- Model: RandomForestClassifier
-- Trees: 50
-- Maximum depth: 15
-- Minimum samples per leaf: 5
-- Class weighting: balanced_subsample
-- Random seed: 42
-- Split: 56 training recordings and 14 validation recordings (recording-level split; 80/20)
-- Training frames: 415,568
-- Validation frames: 92,170
-The validation split is based on recordings, not randomly selected frames, to avoid leakage between adjacent video frames. The official CalMS21 test set was not used for the reported results.
-Results
-Feature engineering experiments
-Input features	Count	Validation accuracy	Validation macro F1
-Raw keypoint positions	28	76.44%	61.54%
-Positions + two neck-speed features	30	79.81%	67.41%
-Positions + speeds + inter-mouse distance	31	82.14%	72.07%
+Data are not redistributed in this repository. Download the archive from the official record and keep it in data/.
+2. Exactly what I analyzed
+The training JSON contains 70 annotated recordings and 507,738 labeled frames for annotator-id_0. I split by recording, not by frame, so frames from one recording cannot appear in both training and validation.
+Partition	Recordings	Frames	Role
+Training	56	415,568	Fit model parameters
+Validation	14	92,170	Compare features and configurations
+Total analyzed	70	507,738	Published Task 1 training data
 
 
-Relative to the original position-only baseline, the final model improved validation accuracy by 5.70 percentage points and macro F1 by 10.53 percentage points. These are observed improvements on a single validation split, not independently confirmed test-set gains.
-Final model: per-class validation results
-Behavior	Precision	Recall	F1-score	Support
-Attack	0.36	0.57	0.44	3,490
-Investigation	0.70	0.81	0.75	27,529
-Mount	0.82	0.75	0.78	10,161
-Other	0.96	0.86	0.91	50,990
+Split code: train_test_split(recording_ids, test_size=0.2, random_state=42). The split is 80/20 by recordings, not exactly by frame count.
+
+Each frame has tracked coordinates for two mice, with seven landmarks per mouse: nose, left ear, right ear, neck, left hip, right hip, and tail base. The keypoint array for one recording has shape (frames, 2, 2, 7); the last two axes encode x/y coordinates and landmark index, respectively. Flattening those coordinates gives 28 position features per frame. Videos are sampled at 30 frames per second.
+
+The four labels are:
+Label	Behavior	All 70 recordings	Share of frames
+0	Attack	14,039	2.77%
+1	Investigation	146,615	28.88%
+2	Mount	28,615	5.64%
+3	Other	318,469	62.72%
 
 
-The model performs best on Other and struggles most with Attack (notably low precision). Attack is rare, and some attack frames are confused with investigation. All of these metrics come from the held-out validation recordings.
-Visualizations
-The following images are generated by the training script and can be committed under results/:
-Normalized confusion matrix
+The imbalance matters. A classifier could achieve high overall accuracy while doing poorly on Attack, which is only about 3% of the frames. For that reason, I report macro F1 and class-level precision/recall alongside accuracy.
+3. What I did
+I built the pipeline in four stages. Throughout the experiments, I kept the same recording-level train/validation split so that changes were comparable.
+Stage 1 — Train the initial XGBoost model
+I flattened the tracked landmarks into 28 x/y position features, then added three geometric and movement features: each mouse's neck displacement between consecutive frames (converted to pixels per second), and the neck-to-neck distance between the mice.
 
-Rows represent actual labels and columns represent predicted labels. Each row is normalized to proportions; the diagonal measures per-class recall.
-Behavior predictions over time
+With these 31 features, I trained a weighted multiclass XGBoost classifier using 200 trees, maximum depth 6, learning rate 0.05, and row/column subsampling of 0.8. I computed balanced per-frame sample weights from the training labels to account for the uneven class frequencies.
 
-A 10-second sample compares frame-by-frame human annotations with model predictions. This plot is illustrative of one sequence, not an overall performance summary.
-Project structure
+This initial configuration achieved 81.32% validation accuracy and 72.08% macro F1.
+Stage 2 — Represent the interaction between the mice
+The original 31 features included only one explicit inter-mouse distance: neck to neck. But two mice at the same neck-to-neck distance could be facing toward or away from one another. I added three geometries that the model previously had to infer from raw coordinates:
+1. Nose-to-nose distance.
+2. Mouse 0's nose to mouse 1's neck.
+3. Mouse 1's nose to mouse 0's neck.
+That brought the feature count to 34. With the previous XGBoost settings unchanged, accuracy increased to 84.73% and macro F1 to 75.70%.
+
+This is evidence that the additional features helped on the chosen validation recordings. It does not establish a causal biological interpretation of any single distance.
+Stage 3 — Include short-term movement history
+Frame-by-frame coordinates give limited information about sustained behavior. I added five temporal features, computed separately within each recording:
+Added feature	Definition
+Mouse 0 rolling speed	Mean neck speed over current and previous 4 frames
+Mouse 1 rolling speed	Same calculation for mouse 1
+Rolling mouse distance	Mean neck-to-neck distance over current and previous 4 frames
+Distance change	Current minus previous neck-to-neck distance
+Mouse 0 acceleration	Change in mouse 0 speed multiplied by 30 Hz
+
+
+The rolling calculations use only present and past frames. For the beginning of each recording, they repeat the first value to fill the initial window rather than borrowing from a different recording. The five-frame window covers approximately 0.17 seconds of samples at 30 Hz.
+
+With 39 total features and the same 200-tree XGBoost configuration, accuracy reached 85.77% and macro F1 reached 77.91%. Attack F1 rose from 0.45 in the 34-feature version to 0.53.
+Stage 4 — Compare a small set of XGBoost configurations
+Finally, I kept the 39 features fixed and compared three manually selected configurations:
+Configuration	Trees	Max depth	Learning rate	Validation accuracy	Macro F1
+Baseline	200	6	0.05	85.77%	77.91%
+Experiment A	350	5	0.03	85.46%	77.62%
+Experiment B	350	8	0.03	86.98%	79.56%
+
+
+I selected Experiment B by validation macro F1, not by accuracy alone. Because the number of trees, depth, and learning rate changed together, this comparison cannot identify which parameter individually caused the improvement. It was a small manual search, not an exhaustive optimization.
+4. What I found
+Model development
+Model	Features	Validation accuracy	Macro F1
+XGBoost, initial	31	81.32%	72.08%
+XGBoost, interaction distances	34	84.73%	75.70%
+XGBoost, temporal features	39	85.77%	77.91%
+XGBoost, tuned	39	86.98%	79.56%
+
+
+From the first 31-feature XGBoost model to the selected 39-feature model, validation accuracy improved by 5.66 percentage points and macro F1 by 7.48 percentage points.
+Best model: individual behaviors
+Behavior	Precision	Recall	F1	Validation frames
+Attack	0.48	0.66	0.55	3,490
+Investigation	0.79	0.83	0.81	27,529
+Mount	0.86	0.93	0.90	10,161
+Other	0.96	0.89	0.93	50,990
+
+
+Attack remains the hardest category. Its recall is about 66%, meaning approximately one-third of true attack frames are missed. Precision is 48%, meaning more than half of the frames flagged as attacks are not labeled Attack. In the normalized confusion matrix, about 29.5% of actual Attack frames are classified as Investigation. An 86.98% aggregate accuracy therefore does not mean every behavior is detected equally well.
+Confusion matrix and time series
+The confusion matrix is normalized by true class: each row sums to 1 and shows where actual instances of a behavior are predicted. These values are fractions of frames, not probability/confidence scores.
+
+The following plot overlays annotated and predicted behaviors for the first 300 validation frames (10 seconds), a qualitative check for rapid label switching and mistakes around transitions.
+
+These figures are generated by Main.py. If image links are broken, run the script or update the paths to match the files in results/.
+5. How to run it
+Requirements: Python and the Python packages below. Development used Python 3.13; other recent Python versions may also work with compatible package releases.
+python -m pip install numpy scikit-learn xgboost matplotlib
+1. Download task1_classic_classification.zip from CaltechDATA.
+2. Place it at data/task1_classic_classification.zip. Do not unzip it; the script reads the training JSON from inside the archive.
+3. Run:
+python Main.py
+The script loads and builds the feature matrix, trains the three candidate configurations, prints validation results, saves plots in results/, and saves the winning classifier in models/.
+
+Important: Running Main.py retrains the models. It is not an inference-only script, and it does not evaluate the official Task 1 test set.
+6. Files in this repository
 CalMS21-Behavior-Classification/
-├── Main.py
 ├── README.md
+├── Main.py
 ├── data/
-│   └── task1_classic_classification.zip  # Download separately; do not commit
+│   └── task1_classic_classification.zip    # download separately; do not commit
 ├── models/
-│   └── mouse_behavior_rf_31features.pkl  # Generated model (optional to commit)
+│   ├── mouse_behavior_xgboost_39features_baseline.json
+│   └── mouse_behavior_xgboost_tuned.json
 └── results/
-    ├── confusion_matrix.png
-    └── behavior_predictions.png
-Setup and usage
-Requirements: Python 3.10+ and the CalMS21 Task 1 dataset archive. The project was developed locally with Python 3.13.
-1. Clone the repository and enter its directory.
-2. Create and activate a virtual environment:
-   python -m venv .venv
-   .\.venv\Scripts\Activate.ps1
-3. Install the Python packages:
-   python -m pip install numpy scikit-learn matplotlib joblib
-4. Download task1_classic_classification.zip from CaltechDATA and place it in the data/ directory without extracting it.
-5. Run:
-   python Main.py
-The script reads the dataset directly from the ZIP file, builds the training/validation matrices, fits the classifier, reports metrics, and saves figures and the model. These instructions assume Main.py contains the feature-engineering, training, plotting, and save steps described above.
-Reproducibility note: The data archive is not distributed in this repository. The saved .pkl model is only compatible with the same 31-feature input order used during training. Load model files only from trusted sources.
+    ├── xgboost_39features_confusion_matrix.png
+    ├── xgboost_39features_predictions.png
+    ├── xgboost_tuned_confusion_matrix.png
+    └── xgboost_tuned_predictions.png
+This tree reflects expected outputs and optional preserved baseline files; files that have not been generated or copied into the repository will not appear. The main artifact for the selected configuration is models/mouse_behavior_xgboost_tuned.json. The model file stores the trained XGBoost trees, not the Python preprocessing/feature-extraction pipeline. Making predictions on a new recording requires applying the same 39-feature extraction in the same order.
 
-Limitations and future work
-- Not an anesthesia model: CalMS21 Task 1 labels social interactions, not anesthetic depth or stimulus response.
-- No raw-video pose estimation: Animal keypoints were provided by CalMS21; this project trains the downstream behavior classifier.
-- Limited temporal context: The classifier predicts per frame from current positions plus short-term speed, without a sequence model.
-- Class imbalance: Attack is uncommon, and its precision remains low.
-- Validation-based model selection: The same held-out validation recordings were used to compare feature sets. A final evaluation on the official test set remains to be done.
-- Pose-estimation uncertainty: Movement estimates can be noisy when landmark predictions are inaccurate.
-Possible extensions include adding relative orientation and longer time-window movement features, evaluating prediction stability, examining feature importance, and measuring final performance on CalMS21's official test set.
-Acknowledgments and citation
-This project uses the Caltech Mouse Social Interactions (CalMS21) Dataset, made publicly available under CC BY 4.0. The original data collection, pose estimation, and expert annotations are credited to the CalMS21 authors.
+A minimal .gitignore should exclude the dataset and environment, for example:
+.venv/
+__pycache__/
+*.pyc
+data/*.zip
+7. Tools and implementation choices
+Tool	Role
+Python	Complete training and evaluation workflow
+NumPy	Pose arrays, distances, speeds, rolling temporal calculations
+scikit-learn	Recording-level split, evaluation metrics, class weighting, confusion-matrix plotting
+XGBoost	Weighted multiclass gradient-boosted tree classifier
+Matplotlib	Confusion matrix and behavior-over-time figures
+zipfile / json	Read the published annotation data without extracting the archive
 
-Dataset: Sun, J. J., Karigo, T., Anderson, D. J., Perona, P., Yue, Y., & Kennedy, A. (2021). Caltech Mouse Social Interactions (CalMS21) Dataset (Version 1.0). CaltechDATA. https://doi.org/10.22002/D1.1991
 
-Research paper: Sun, J. J., et al. (2021). The Multi-Agent Behavior Dataset: Mouse Dyadic Social Interactions. https://arxiv.org/abs/2104.02710
+The tuned XGBoost model uses objective="multi:softprob", tree_method="hist", n_estimators=350, max_depth=8, learning_rate=0.03, subsample=0.8, colsample_bytree=0.8, and random_state=42.
+8. Limitations
+The main limitation is model selection on one validation split. I used the same 14 recordings to compare feature sets and hyperparameters. This makes the development comparisons useful, but it can make the selected 86.98% validation accuracy optimistic as an estimate of performance on entirely new recordings. I have not performed an independent final test evaluation or recording-level cross-validation. These numbers should not be described as official benchmark results.
 
-The results in this repository are from an independent educational machine learning project and should not be attributed to the CalMS21 authors.
+Frame-level metrics are not independent observations. Neighboring frames in a recording are strongly related. Although the train/validation split prevents the same recording from appearing on both sides, uncertainty cannot be assessed as if all 92,170 validation frames were independent samples. A more rigorous report would evaluate consistency across multiple held-out recordings or recording-level folds.
+
+Pose quality was not separately audited. I relied on the published tracked coordinates and annotations. Sudden jumps or incorrect keypoints can distort velocity and acceleration. The first frame of each recording is assigned zero displacement by construction; it is not an observed stationary frame.
+
+The features are intentionally limited. The model uses short, causal rolling windows and distances between selected landmarks. It does not learn directly from video pixels, explicitly model longer behavioral sequences, or use the provided tracking confidence scores. Additional geometry, smoothing, or sequence models might help, but those possibilities were not tested here.
+
+The class distribution is imbalanced. Even with training sample weights, Attack has much lower precision and F1 than Mount or Other. Reporting accuracy alone would obscure this weakness.
+
+This is not an anesthesia classifier. CalMS21 labels social behaviors in freely interacting mice. I became interested in pose-based behavior classification in connection with broader research applications, but these experiments do not measure anesthetic depth, stimulus response, or clinical state.
+9. What I would test next
+The most important next experiment is independent evaluation on labeled recordings that were not used in any feature or hyperparameter decisions, if suitable held-out ground truth is available. Otherwise, a carefully designed recording-level cross-validation study would give a more useful estimate of variation across recordings, although it would not be a previously untouched test set.
+
+I would also examine per-recording Attack performance, test landmark tracking noise, and compare longer temporal windows. Those experiments would address specific weaknesses rather than optimizing an already-selected validation score indefinitely.
+References and attribution
+- Sun, J. J., Karigo, T., Chakraborty, D., Mohanty, S. P., Wild, B., Sun, Q., Chen, C., Anderson, D. J., Perona, P., Yue, Y., & Kennedy, A. (2021). The Multi-Agent Behavior Dataset: Mouse Dyadic Social Interactions. NeurIPS Datasets and Benchmarks. Paper.
+- Caltech Mouse Social Interactions (CalMS21) Dataset, CaltechDATA. DOI: 10.22002/D1.1991.
+All dataset credit belongs to the original CalMS21 authors. This repository contains my independent feature engineering, model training, evaluation, and presentation of the results; it does not claim to have produced the source mouse recordings, pose tracks, or behavior annotations.
