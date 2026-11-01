@@ -17,7 +17,7 @@ The purpose of this project is not to introduce a new behavioral classification 
 
 **Original research:** CalMS21: A Benchmark for Measuring the Performance of Automated Behavior Classifiers
 
-**Dataset repository:** https://github.com/caltechvisionlab/CalMS21
+**Dataset link:** https://data.caltech.edu/records/s0vdx-0k302
 
 CalMS21 contains pose-tracking measurements of pairs of mice during social interactions. Each recording provides the locations of anatomical landmarks across video frames, along with human-annotated behavioral labels.
 
