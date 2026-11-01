@@ -493,4 +493,4 @@ The remaining challenge is establishing how well those improvements generalize b
 
 Caltech Vision Lab. CalMS21: A Benchmark for Measuring the Performance of Automated Behavior Classifiers.
 
-Dataset and documentation: https://github.com/caltechvisionlab/CalMS21
+Dataset and documentation: https://data.caltech.edu/records/s0vdx-0k302
